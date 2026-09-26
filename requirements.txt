@@ -7,6 +7,7 @@ torchvision
 Pillow
 python-dotenv
 google-genai
+deep-translator
 
 # Chatbot / LLM Dependencies
 transformers

@@ -4,6 +4,54 @@ import json
 import requests
 from typing import Dict, Any, Optional
 
+LANGUAGE_CODES = {
+    "English": "en",
+    "Hindi": "hi",
+    "Spanish": "es",
+    "French": "fr",
+    "German": "de",
+    "Arabic": "ar",
+    "Chinese": "zh-CN",
+    "Japanese": "ja",
+    "Portuguese": "pt",
+    "Bengali": "bn",
+    "Tamil": "ta",
+    "Marathi": "mr",
+}
+
+
+def _translate_response(text: str, language: str) -> str:
+    if not text or language == "English":
+        return text
+
+    target_code = LANGUAGE_CODES.get(language)
+    if not target_code:
+        return f"{text}\n\n[Translation unavailable for {language}; showing English.]"
+
+    try:
+        from deep_translator import GoogleTranslator
+
+        translated = GoogleTranslator(source="auto", target=target_code).translate(text)
+        if translated:
+            return translated
+    except Exception as error:
+        print(f"[Translation Warning] Could not translate to {language}: {error}")
+
+    return f"{text}\n\n[Translation unavailable for {language}; showing English.]"
+
+
+def _translate_to_english(text: str, language: str) -> str:
+    if not text or language == "English":
+        return text
+
+    try:
+        from deep_translator import GoogleTranslator
+
+        return GoogleTranslator(source="auto", target="en").translate(text) or text
+    except Exception as error:
+        print(f"[Translation Warning] Could not translate question from {language}: {error}")
+        return text
+
 # Load environment variables if available
 try:
     from dotenv import load_dotenv
@@ -351,13 +399,13 @@ The fine-tuned MobileNetV3 deep learning model classified the uploaded image as:
 - Confidence: {confidence:.1f}%
 
 Generate a comprehensive, structured response in {language} containing:
-1. 🔍 **Model Decision & Visual Markers**: Explain the key anatomical features (beak, plumage, markings, coloration) that led the neural network to classify this image as {bird_name}.
+1. 🔍 **Species Field Marks**: Describe field marks associated with {bird_name}, clearly labeling them as reference information, not evidence from this particular image.
 2. 🐦 **About the Bird**: Concise overview of its physical traits and behavior.
 3. 🌿 **Habitat & Range**: Where this bird lives and geographic distribution.
 4. 🐛 **Diet & Feeding**: What it feeds on in the wild.
 5. ⭐ **Fun Fact**: One fascinating, unique trivia fact.
 
-Keep formatting clean with emojis and bold headers. Answer completely in {language}.
+The classifier provides a class score but no saliency map or pixel-level attribution. Do not claim that any feature caused the prediction or that you inspected specific image regions. Describe confidence as a model score, not a calibrated probability. Keep formatting clean and answer completely in {language}.
 """
                 # Try google.genai (new SDK)
                 if hasattr(client, "models"):
@@ -379,10 +427,10 @@ Keep formatting clean with emojis and bold headers. Answer completely in {langua
         wiki_extract = web_agent_search(bird_name, scientific_name)
         about_text = wiki_extract if wiki_extract else bird_data.get("description", "")
         
-        explanation = f"""### 🔍 Classification Breakdown: **{bird_name}** (*{scientific_name}*)
+        explanation = f"""### 🔍 Classification Report: **{bird_name}** (*{scientific_name}*)
 
-1. **Model Decision & Visual Markers** ({confidence:.1f}% Confidence):
-   - The MobileNetV3 model analyzed key feature embeddings: **{bird_data.get('identification', '')}**
+1. **Model Score**: {confidence:.1f}% (not a calibrated probability)
+    - **Species field marks** (reference information, not a pixel-level explanation): {bird_data.get('identification', '')}
 
 2. **About the Species**:
    - {about_text}
@@ -399,10 +447,7 @@ Keep formatting clean with emojis and bold headers. Answer completely in {langua
 ---
 *🛡️ Powered by BirdBot Free Hybrid Agent (Live Tool Retrieval & Local Knowledge Base)*"""
 
-        if language != "English":
-            explanation = f"*(Note: Showing English report. For {language}, configure your Gemini API Key in .env for full live translation.)*\n\n" + explanation
-
-        return explanation
+        return _translate_response(explanation, language)
 
     @classmethod
     def answer_chat(cls, bird_name: str, scientific_name: str, message: str, language: str = "English") -> str:
@@ -410,7 +455,6 @@ Keep formatting clean with emojis and bold headers. Answer completely in {langua
         Answers user follow-up questions intelligently using Tier 1 (Gemini),
         Tier 2 (Wikipedia Tool), or Tier 3 (Smart Local Query Matcher).
         """
-        user_q = message.lower().strip()
         bird_data = cls.get_bird_data(bird_name)
         
         # Tier 1: Try Gemini API
@@ -420,9 +464,16 @@ Keep formatting clean with emojis and bold headers. Answer completely in {langua
                 prompt = f"""
 You are BirdBot, a helpful AI ornithologist assistant.
 The conversation is about the bird: {bird_name} ({scientific_name}).
+Known reference facts:
+- Description: {bird_data.get('description', '')}
+- Field marks: {bird_data.get('identification', '')}
+- Habitat: {bird_data.get('habitat', '')}
+- Diet: {bird_data.get('diet', '')}
+- Fun fact: {bird_data.get('fun_fact', '')}
 The user asks: "{message}"
 
 Answer accurately, engagingly, and concisely in {language}.
+Use the supplied facts when relevant. Do not claim to know what visual features caused the classifier's prediction.
 """
                 if hasattr(client, "models"):
                     resp = client.models.generate_content(
@@ -438,21 +489,24 @@ Answer accurately, engagingly, and concisely in {language}.
             except Exception as e:
                 print(f"[Agent Warning] Gemini Chat failed: {e}. Falling back to Tool & Local Agent.")
 
-        # Tier 2 & 3: Smart Tool & Knowledge Matcher
-        if any(w in user_q for w in ["diet", "eat", "food", "feed", "prey", "hunting"]):
-            return f"**Diet of the {bird_name}:** {bird_data.get('diet')}"
-        elif any(w in user_q for w in ["habitat", "live", "where", "found", "country", "location", "place", "nest"]):
-            return f"**Habitat & Range of the {bird_name}:** {bird_data.get('habitat')}"
-        elif any(w in user_q for w in ["fact", "trivia", "special", "unique", "interesting"]):
-            return f"**Did you know?** {bird_data.get('fun_fact')}"
-        elif any(w in user_q for w in ["look", "color", "beak", "feather", "identify", "size", "wing", "shape"]):
-            return f"**Identification & Features:** {bird_data.get('identification')}"
-        elif any(w in user_q for w in ["name", "scientific", "called", "species"]):
-            return f"The common name is **{bird_name}** and its scientific classification is ***{scientific_name}***."
+        # Tier 2 & 3: question-aware local facts, then a clearly labeled overview.
+        user_q = _translate_to_english(message, language).casefold().strip()
+        local_answers = (
+            (r"\b(diet|eat|food|feed|prey|hunting)\b", f"**Diet of the {bird_name}:** {bird_data.get('diet')}"),
+            (r"\b(habitat|live|where|found|country|location|place|nest|range)\b", f"**Habitat & Range of the {bird_name}:** {bird_data.get('habitat')}"),
+            (r"\b(fact|trivia|special|unique|interesting)\b", f"**Did you know?** {bird_data.get('fun_fact')}"),
+            (r"\b(look|color|beak|feather|identify|size|wing|shape|markings)\b", f"**Field marks for {bird_name}:** {bird_data.get('identification')}"),
+            (r"\b(name|scientific|called|species)\b", f"The common name is **{bird_name}** and its scientific classification is ***{scientific_name}***."),
+            (r"\b(about|describe|description|overview|behavior)\b", f"**About the {bird_name}:** {bird_data.get('description')}"),
+        )
+        for pattern, answer in local_answers:
+            if re.search(pattern, user_q):
+                return _translate_response(answer, language)
         
-        # General query: Try Wikipedia Tool
+        # A summary may provide context, but is not guaranteed to answer the exact question.
         wiki_text = web_agent_search(bird_name, scientific_name)
         if wiki_text:
-            return f"**About the {bird_name}:**\n{wiki_text}"
-            
-        return f"Regarding the **{bird_name}** (*{scientific_name}*): {bird_data.get('description')} Feel free to ask about its diet, habitat, visual features, or fun facts!"
+            answer = f"I don't have a specific local answer for that question. Here is a general overview of the {bird_name}:\n{wiki_text}"
+        else:
+            answer = f"I don't have a specific local answer for that question. About the **{bird_name}** (*{scientific_name}*): {bird_data.get('description')} You can ask about its diet, habitat, field marks, or a fun fact."
+        return _translate_response(answer, language)
