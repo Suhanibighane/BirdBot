@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+.env
+*.exe
+*.pdf
+*.docx
+*.ipynb
+logs/
+results/
+Project Results/

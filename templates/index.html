@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BirdBot – AI Bird Classifier & Expert Chat</title>
+    <meta name="description" content="Upload a bird image, let MobileNetV3 identify it, then chat with an AI ornithologist for multilingual explanations.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:           #0b1120;
+            --surface:      #111827;
+            --surface2:     #1a2436;
+            --border:       rgba(255,255,255,0.08);
+            --accent:       #4ade80;
+            --accent2:      #22d3ee;
+            --accent-glow:  rgba(74,222,128,0.18);
+            --text:         #f0fdf4;
+            --text-muted:   #94a3b8;
+            --user-bubble:  #166534;
+            --bot-bubble:   #1e3a5f;
+            --radius:       16px;
+            --shadow:       0 8px 40px rgba(0,0,0,0.5);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Header ── */
+        header {
+            padding: 20px 40px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            background: rgba(11,17,32,0.85);
+            position: sticky; top: 0; z-index: 100;
+        }
+        header .logo-icon {
+            font-size: 1.8rem;
+            filter: drop-shadow(0 0 8px var(--accent));
+        }
+        header h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        header .badge {
+            margin-left: auto;
+            font-size: 0.72rem;
+            background: var(--accent-glow);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        /* ── Layout ── */
+        main {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 0;
+            flex: 1;
+            height: calc(100vh - 65px);
+            overflow: hidden;
+        }
+
+        /* ── Left Panel – Upload ── */
+        .upload-panel {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 28px 24px;
+            gap: 20px;
+        }
+
+        .upload-panel h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        /* Drop Zone */
+        .drop-zone {
+            border: 2px dashed rgba(74,222,128,0.35);
+            border-radius: var(--radius);
+            padding: 32px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: var(--surface2);
+            position: relative;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent);
+            background: var(--accent-glow);
+            box-shadow: 0 0 24px var(--accent-glow);
+        }
+        .drop-zone .dz-icon { font-size: 2.4rem; margin-bottom: 12px; }
+        .drop-zone p { font-size: 0.88rem; color: var(--text-muted); }
+        .drop-zone strong { color: var(--accent); }
+        #fileInput { display: none; }
+
+        /* Preview */
+        #previewBox {
+            display: none;
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+        #previewBox img {
+            width: 100%; display: block;
+            max-height: 220px; object-fit: cover;
+        }
+        #previewBox .remove-btn {
+            position: absolute; top: 8px; right: 8px;
+            background: rgba(0,0,0,0.6); color: white;
+            border: none; border-radius: 50%;
+            width: 28px; height: 28px; cursor: pointer;
+            font-size: 1rem; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Language Select */
+        .field-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+        select#langSelect {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            transition: border-color 0.2s;
+        }
+        select#langSelect:focus { outline: none; border-color: var(--accent); }
+
+        /* Classify Button */
+        #classifyBtn {
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(135deg, #16a34a, #0d9488);
+            border: none; border-radius: 12px;
+            color: white; font-size: 1rem;
+            font-weight: 600; font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.25s;
+            box-shadow: 0 4px 20px rgba(22,163,74,0.35);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        #classifyBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 28px rgba(22,163,74,0.5);
+        }
+        #classifyBtn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+        /* Result card */
+        #resultCard {
+            display: none;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        #resultCard .card-header {
+            background: linear-gradient(135deg, rgba(74,222,128,0.12), rgba(34,211,238,0.12));
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        #resultCard .bird-name {
+            font-size: 1.15rem; font-weight: 700; color: var(--accent);
+        }
+        #resultCard .sci-name {
+            font-size: 0.82rem; font-style: italic; color: var(--accent2); margin-top: 2px;
+        }
+        #resultCard .confidence-bar-wrap {
+            margin-top: 10px;
+        }
+        #resultCard .confidence-label {
+            font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;
+        }
+        #resultCard .confidence-bar {
+            height: 6px; border-radius: 4px;
+            background: var(--border);
+            overflow: hidden;
+        }
+        #resultCard .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            border-radius: 4px;
+            transition: width 0.8s ease;
+        }
+
+        /* ── Right Panel – Chat ── */
+        .chat-panel {
+            display: flex; flex-direction: column;
+            background: var(--bg);
+            overflow: hidden;
+        }
+        .chat-header {
+            padding: 18px 28px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .chat-header .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #9ca3af;
+        }
+        .chat-header .status-dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+        .chat-header span { font-size: 0.88rem; color: var(--text-muted); }
+
+        /* Messages */
+        #messages {
+            flex: 1; overflow-y: auto; padding: 24px 28px;
+            display: flex; flex-direction: column; gap: 16px;
+            scroll-behavior: smooth;
+        }
+        #messages::-webkit-scrollbar { width: 4px; }
+        #messages::-webkit-scrollbar-track { background: transparent; }
+        #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        .msg { display: flex; gap: 10px; max-width: 80%; animation: fadeUp 0.3s ease; }
+        .msg.bot  { align-self: flex-start; }
+        .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; flex-shrink: 0;
+        }
+        .bot .avatar  { background: linear-gradient(135deg, #166534, #0d6e7e); }
+        .user .avatar { background: #374151; }
+
+        .bubble {
+            padding: 12px 16px; border-radius: 16px;
+            font-size: 0.9rem; line-height: 1.6;
+            white-space: pre-wrap; word-break: break-word;
+        }
+        .bot  .bubble { background: var(--bot-bubble);  border-bottom-left-radius:  4px; color: #e0f2fe; }
+        .user .bubble { background: var(--user-bubble); border-bottom-right-radius: 4px; color: #dcfce7; }
+
+        .bubble strong { color: var(--accent); }
+        .bubble em     { color: var(--accent2); }
+
+        .typing-indicator span {
+            display: inline-block; width: 7px; height: 7px;
+            background: var(--text-muted); border-radius: 50%; margin: 0 2px;
+            animation: bounce 1.1s infinite;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.18s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.36s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: translateY(0); }
+            40%           { transform: translateY(-6px); }
+        }
+
+        /* Input bar */
+        .input-bar {
+            padding: 16px 28px;
+            border-top: 1px solid var(--border);
+            display: flex; gap: 10px; align-items: center;
+        }
+        #chatInput {
+            flex: 1; background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text); border-radius: 12px;
+            padding: 12px 16px; font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            resize: none; outline: none;
+            transition: border-color 0.2s;
+        }
+        #chatInput:focus  { border-color: var(--accent); }
+        #chatInput::placeholder { color: var(--text-muted); }
+
+        #sendBtn {
+            background: linear-gradient(135deg, #16a34a, #0d9488);
+            border: none; border-radius: 12px;
+            width: 44px; height: 44px;
+            cursor: pointer; color: white; font-size: 1.1rem;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s; flex-shrink: 0;
+        }
+        #sendBtn:hover:not(:disabled) { transform: scale(1.08); box-shadow: 0 4px 16px rgba(22,163,74,0.4); }
+        #sendBtn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        /* Empty state */
+        .empty-state {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 12px; color: var(--text-muted); text-align: center;
+            padding: 40px;
+        }
+        .empty-state .icon { font-size: 3rem; opacity: 0.4; }
+        .empty-state p  { font-size: 0.9rem; max-width: 300px; line-height: 1.6; }
+
+        /* Spinner */
+        .spinner {
+            width: 18px; height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+            .upload-panel { border-right: none; border-bottom: 1px solid var(--border); max-height: 50vh; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <span class="logo-icon">🦜</span>
+    <h1>BirdBot</h1>
+    <span class="badge">MobileNetV3 + Gemini AI</span>
+</header>
+
+<main>
+    <!-- ── LEFT: Upload + Controls ── -->
+    <aside class="upload-panel">
+        <h2>🔬 Classify a Bird</h2>
+
+        <!-- Drop zone -->
+        <div class="drop-zone" id="dropZone">
+            <div class="dz-icon">📷</div>
+            <p>Drag & drop a bird image here<br>or <strong>click to browse</strong></p>
+            <input type="file" id="fileInput" accept="image/*">
+        </div>
+
+        <!-- Preview -->
+        <div id="previewBox">
+            <img id="previewImg" alt="Uploaded bird image">
+            <button class="remove-btn" id="removeBtn" title="Remove image">✕</button>
+        </div>
+
+        <!-- Language -->
+        <div>
+            <div class="field-label">🌐 Response Language</div>
+            <select id="langSelect">
+                <option value="English">🇬🇧 English</option>
+                <option value="Hindi">🇮🇳 Hindi (हिन्दी)</option>
+                <option value="Spanish">🇪🇸 Spanish (Español)</option>
+                <option value="French">🇫🇷 French (Français)</option>
+                <option value="German">🇩🇪 German (Deutsch)</option>
+                <option value="Arabic">🇸🇦 Arabic (العربية)</option>
+                <option value="Chinese">🇨🇳 Chinese (中文)</option>
+                <option value="Japanese">🇯🇵 Japanese (日本語)</option>
+                <option value="Portuguese">🇧🇷 Portuguese (Português)</option>
+                <option value="Bengali">🇧🇩 Bengali (বাংলা)</option>
+                <option value="Tamil">🇮🇳 Tamil (தமிழ்)</option>
+                <option value="Marathi">🇮🇳 Marathi (मराठी)</option>
+            </select>
+        </div>
+
+        <!-- Classify button -->
+        <button id="classifyBtn" disabled>
+            <span id="btnIcon">🔍</span> Identify Bird
+        </button>
+
+        <!-- Result card -->
+        <div id="resultCard">
+            <div class="card-header">
+                <div class="bird-name" id="cardBirdName">–</div>
+                <div class="sci-name"  id="cardSciName">–</div>
+                <div class="confidence-bar-wrap">
+                    <div class="confidence-label">Model Confidence: <span id="confValue">–</span>%</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confFill" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── RIGHT: Chat ── -->
+    <section class="chat-panel">
+        <div class="chat-header">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="chatStatus">Upload an image to start chatting with BirdBot</span>
+        </div>
+
+        <div id="messages">
+            <div class="empty-state" id="emptyState">
+                <div class="icon">🦅</div>
+                <p>Upload a bird photo on the left and click <strong>Identify Bird</strong>. BirdBot will explain exactly what was found and why — in your language!</p>
+            </div>
+        </div>
+
+        <div class="input-bar">
+            <textarea id="chatInput" rows="1" placeholder="Ask BirdBot anything about the identified bird…" disabled></textarea>
+            <button id="sendBtn" disabled title="Send message">➤</button>
+        </div>
+    </section>
+</main>
+
+<script>
+// ── State ────────────────────────────────────
+let currentBird     = null;
+let currentSciName  = null;
+let selectedFile    = null;
+
+// ── DOM refs ─────────────────────────────────
+const dropZone    = document.getElementById('dropZone');
+const fileInput   = document.getElementById('fileInput');
+const previewBox  = document.getElementById('previewBox');
+const previewImg  = document.getElementById('previewImg');
+const removeBtn   = document.getElementById('removeBtn');
+const langSelect  = document.getElementById('langSelect');
+const classifyBtn = document.getElementById('classifyBtn');
+const btnIcon     = document.getElementById('btnIcon');
+const resultCard  = document.getElementById('resultCard');
+const messages    = document.getElementById('messages');
+const chatInput   = document.getElementById('chatInput');
+const sendBtn     = document.getElementById('sendBtn');
+const emptyState  = document.getElementById('emptyState');
+const statusDot   = document.getElementById('statusDot');
+const chatStatus  = document.getElementById('chatStatus');
+
+// ── File selection ────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) setFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+function setFile(f) {
+    selectedFile = f;
+    const url = URL.createObjectURL(f);
+    previewImg.src = url;
+    previewBox.style.display = 'block';
+    dropZone.style.display   = 'none';
+    classifyBtn.disabled     = false;
+}
+
+removeBtn.addEventListener('click', () => {
+    selectedFile  = null; fileInput.value = '';
+    previewBox.style.display = 'none';
+    dropZone.style.display   = 'block';
+    classifyBtn.disabled     = true;
+    resultCard.style.display = 'none';
+});
+
+// ── Classify ──────────────────────────────────
+classifyBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('language', langSelect.value);
+
+    try {
+        const res  = await fetch('/predict', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (data.error) { appendMsg('bot', `❌ Error: ${data.error}`); return; }
+
+        // ── Update result card ──
+        currentBird    = data.prediction;
+        currentSciName = data.scientific_name;
+
+        document.getElementById('cardBirdName').textContent = data.prediction;
+        document.getElementById('cardSciName').textContent  = data.scientific_name;
+        document.getElementById('confValue').textContent    = data.confidence;
+        setTimeout(() => {
+            document.getElementById('confFill').style.width = data.confidence + '%';
+        }, 100);
+        resultCard.style.display = 'block';
+
+        // ── Enable chat ──
+        chatInput.disabled = false;
+        sendBtn.disabled   = false;
+        chatInput.placeholder = `Ask BirdBot about ${data.prediction}…`;
+        statusDot.classList.add('active');
+        chatStatus.textContent = `Chatting about: ${data.prediction}`;
+
+        // ── Post LLM explanation in chat ──
+        if (emptyState) emptyState.remove();
+        appendMsg('bot', `🦜 **Identified: ${data.prediction}**\n*${data.scientific_name}*\nConfidence: ${data.confidence}%\n\n${data.explanation}`);
+
+    } catch (err) {
+        appendMsg('bot', `❌ Network error: ${err.message}`);
+    } finally {
+        setLoading(false);
+    }
+});
+
+// ── Chat ──────────────────────────────────────
+async function sendMessage() {
+    const text = chatInput.value.trim();
+    if (!text || !currentBird) return;
+
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+    appendMsg('user', text);
+
+    const typing = appendTyping();
+    sendBtn.disabled = chatInput.disabled = true;
+
+    try {
+        const res  = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bird_name:       currentBird,
+                scientific_name: currentSciName,
+                message:         text,
+                language:        langSelect.value
+            })
+        });
+        const data = await res.json();
+        typing.remove();
+        appendMsg('bot', data.reply || `❌ ${data.error}`);
+    } catch (err) {
+        typing.remove();
+        appendMsg('bot', `❌ Network error: ${err.message}`);
+    } finally {
+        sendBtn.disabled = chatInput.disabled = false;
+        chatInput.focus();
+    }
+}
+
+sendBtn.addEventListener('click', sendMessage);
+chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// Auto-resize textarea
+chatInput.addEventListener('input', () => {
+    chatInput.style.height = 'auto';
+    chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+});
+
+// ── Helpers ───────────────────────────────────
+function appendMsg(role, text) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role}`;
+    wrap.innerHTML = `
+        <div class="avatar">${role === 'bot' ? '🦜' : '👤'}</div>
+        <div class="bubble">${formatText(text)}</div>`;
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return wrap;
+}
+
+function appendTyping() {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg bot';
+    wrap.innerHTML = `<div class="avatar">🦜</div>
+        <div class="bubble"><div class="typing-indicator">
+            <span></span><span></span><span></span>
+        </div></div>`;
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return wrap;
+}
+
+function formatText(t) {
+    return t
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g,     '<em>$1</em>')
+        .replace(/\n/g,            '<br>');
+}
+
+function setLoading(loading) {
+    classifyBtn.disabled = loading;
+    if (loading) {
+        btnIcon.innerHTML = '<div class="spinner"></div>';
+        classifyBtn.lastChild.textContent = ' Analyzing…';
+    } else {
+        btnIcon.textContent = '🔍';
+        classifyBtn.lastChild.textContent = ' Identify Bird';
+    }
+}
+</script>
+</body>
+</html>

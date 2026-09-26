@@ -1,0 +1,21 @@
+# Flask App Dependencies
+flask
+gunicorn
+requests
+torch
+torchvision
+Pillow
+python-dotenv
+google-genai
+
+# Chatbot / LLM Dependencies
+transformers
+peft
+langchain
+langchain-community
+langchain-huggingface
+chromadb
+sentence-transformers
+datasets
+trl
+bitsandbytes
