@@ -3,6 +3,7 @@ from PIL import Image
 import io
 import os
 import requests
+from bird_agent import BirdBotAgent
 
 app = Flask(__name__)
 
@@ -14,7 +15,7 @@ IMAGES_FOLDER = os.path.join(STATIC_FOLDER, "images")
 
 # ─────────────────────────────────────────────
 # Cloud Inference Configuration
-# If CLOUD_INFERENCE_URL is set (e.g. AWS SageMaker / HF Endpoint),
+# If CLOUD_INFERENCE_URL is set (e.g. AWS SageMaker / Google Cloud Run),
 # the app bypasses loading PyTorch locally and uses the Cloud API.
 # ─────────────────────────────────────────────
 CLOUD_INFERENCE_URL = os.environ.get("CLOUD_INFERENCE_URL", "")
@@ -28,7 +29,13 @@ if not CLOUD_INFERENCE_URL:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     mobilenet = mobilenet_v3_large(weights=None)
     mobilenet.classifier[3] = torch.nn.Linear(in_features=1280, out_features=25)
-    model_path = os.path.join(os.path.dirname(__file__), "best_model_epoch_19.pth")
+    
+    # Priority: mobilenetv3_large_bird_classification.pth -> best_model_epoch_19.pth
+    primary_model = os.path.join(os.path.dirname(__file__), "mobilenetv3_large_bird_classification.pth")
+    fallback_model = os.path.join(os.path.dirname(__file__), "best_model_epoch_19.pth")
+    model_path = primary_model if os.path.exists(primary_model) else fallback_model
+    
+    print(f"Loading weights from: {os.path.basename(model_path)}")
     mobilenet.load_state_dict(torch.load(model_path, map_location=device))
     mobilenet.to(device)
     mobilenet.eval()
@@ -76,36 +83,6 @@ bird_info = {
 class_names = list(bird_info.keys())
 
 # ─────────────────────────────────────────────
-# Helper: Generate Rule-based Explanation (Offline)
-# ─────────────────────────────────────────────
-def generate_explanation(bird_name: str, scientific_name: str, language: str, confidence: float) -> str:
-    """Generate a template-based explanation without using any external API."""
-    
-    # Offline dictionary containing brief facts for local fallback.
-    local_knowledge = {
-        'Asian Green Bee-Eater': 'It is a near passerine bird in the bee-eater family. Known for its vivid green plumage and habit of catching insects on the wing. Usually found in open woodland or grassland across Asia.',
-        'Indian Peacock': 'Also known as the Indian Peafowl, it is native to the Indian subcontinent. Males display a magnificent tail covert composed of beautiful elongated feathers. They thrive in deciduous forests.',
-    }
-    
-    fact = local_knowledge.get(bird_name, f"The {bird_name} ({scientific_name}) is a fascinating bird species. It exhibits unique plumage and physical characteristics that our deep learning model recognized with high confidence.")
-    
-    explanation = f"""Here is a breakdown of the classification for the **{bird_name}** ({scientific_name}):
-
-1. **Identification** – The model recognized this bird with {confidence:.1f}% confidence. It identified key visual features in the image such as the beak shape, color patterns, and wing structures unique to the {bird_name}.
-2. **About the Bird** – {fact}
-3. **Habitat & Range** – Typically inhabits environments suited for its foraging needs. It is well-adapted to its native ecological niche.
-4. **Fun Fact** – The {bird_name} plays an important role in its local ecosystem, often aiding in insect control or seed dispersal!
-
-*Note: This explanation was generated locally offline.*"""
-    
-    # Simple language notice if not English
-    if language != "English":
-         explanation = f"*(Note: Translation to {language} is limited in offline mode.)*\n\n" + explanation
-         
-    return explanation
-
-
-# ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
 @app.route('/')
@@ -129,7 +106,7 @@ def predict():
         img_bytes = file.read()
         
         if CLOUD_INFERENCE_URL:
-            # Bypass local PyTorch and send image to Cloud API (AWS / HuggingFace)
+            # Bypass local PyTorch and send image to Cloud API (AWS / Google Cloud Run)
             response = requests.post(CLOUD_INFERENCE_URL, files={'file': img_bytes})
             response.raise_for_status()
             api_result = response.json()
@@ -147,14 +124,16 @@ def predict():
 
             class_index = predicted.item()
             confidence_pct = confidence.item() * 100
+
         if class_index >= len(class_names):
             return jsonify({"error": "Predicted class index out of range"}), 500
 
         predicted_class = class_names[class_index]
         bird_details = bird_info[predicted_class]
 
-        # 2. Generate LLM explanation (Explainable AI)
-        explanation = generate_explanation(
+        # 2. Generate Explanation via BirdBotAgent (Tier 1 Gemini -> Tier 2 Wikipedia -> Tier 3 Local KB)
+        explanation = BirdBotAgent.generate_explanation(
+            bird_key=predicted_class,
             bird_name=bird_details['name'],
             scientific_name=bird_details['scientific_name'],
             language=language,
@@ -167,7 +146,7 @@ def predict():
             "image":            bird_details['image'],
             "confidence":       round(confidence_pct, 2),
             "language":         language,
-            "explanation":      explanation,   # LLM-generated XAI text
+            "explanation":      explanation,
         })
 
     except Exception as e:
@@ -176,24 +155,22 @@ def predict():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Allows follow-up chat questions about the identified bird using local offline responses."""
-    data = request.get_json()
+    """Allows follow-up Q&A about the identified bird powered by BirdBotAgent."""
+    data = request.get_json() or {}
     bird_name = data.get('bird_name', '')
     scientific_name = data.get('scientific_name', '')
-    user_message = data.get('message', '').lower()
+    user_message = data.get('message', '')
+    language = data.get('language', 'English')
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
-    # Very basic keyword-based fallback chatbot
-    if 'diet' in user_message or 'eat' in user_message or 'food' in user_message:
-        reply = f"The {bird_name} generally feeds on insects, seeds, or small invertebrates, depending on its specific natural diet."
-    elif 'habitat' in user_message or 'live' in user_message or 'where' in user_message:
-        reply = f"The {bird_name} ({scientific_name}) is commonly found in habitats that support its foraging and nesting needs, such as woodlands, wetlands, or grasslands."
-    elif 'name' in user_message or 'scientific' in user_message:
-        reply = f"Its scientific name is {scientific_name}."
-    else:
-        reply = f"That's an interesting question about the {bird_name}! I am currently running in offline mode, so my knowledge base is limited right now. Let's observe its picture together!"
+    reply = BirdBotAgent.answer_chat(
+        bird_name=bird_name,
+        scientific_name=scientific_name,
+        message=user_message,
+        language=language
+    )
 
     return jsonify({"reply": reply})
 

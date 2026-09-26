@@ -19,3 +19,5 @@ sentence-transformers
 datasets
 trl
 bitsandbytes
+
+boto3

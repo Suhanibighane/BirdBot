@@ -1,190 +1,115 @@
-# BirdBot – Full Implementation Plan (Completed)
+# 🦅 BirdBot – Complete Implementation Plan (DL + Free Retrieval Agent + CC)
 
-A complete record of the architecture, changes made, and how all components fit together.
-
----
-
-## 📌 Project Goal
-
-Extend the existing **MobileNetV3-based bird classification Flask app** into a **ChatGPT-like conversational AI** that:
-1. Classifies a bird image using the fine-tuned deep learning model
-2. Explains the classification in **natural language** (Explainable AI)
-3. Supports **12 languages** for responses
-4. Allows users to **follow-up chat** with an AI ornithologist about the identified bird
+This document contains the complete technical architecture and implementation details for **BirdBot**, an intelligent AI ornithologist web application built using **Deep Learning (DL)**, **Free Tool-Based Retrieval Agent (Wikipedia / Web)**, and **Cloud Computing (CC)**.
 
 ---
 
-## 🏗️ Architecture Overview
+## 📌 Project Overview & Objectives
+
+1. **Vision Classification (Deep Learning)**: Classifies bird images into 25 species using a fine-tuned **MobileNetV3 Large** neural network model (`mobilenetv3_large_bird_classification.pth`).
+2. **Zero-Failure Hybrid Agent (XAI & Q&A)**: 
+   - **Tier 1 (Cloud LLM)**: Google Gemini API (when online with API key) for natural, conversational reasoning in 12 languages.
+   - **Tier 2 (Free Live Tool Retrieval)**: Wikipedia REST API web agent to fetch live facts without API keys or quota limits if the API fails.
+   - **Tier 3 (Local 25-Species Knowledge Base)**: Comprehensive offline encyclopedia ensuring 100% uptime with 0ms latency.
+3. **Cloud Computing (Deployment & Scalability)**: 
+   - Option for separate cloud inference microservice (Google Cloud Run / AWS Lambda).
+   - Lightweight web application deployment via Render / Railway / Heroku.
+
+---
+
+## 🏗️ System Architecture
 
 ```
-User Browser
-     │
-     │  POST /predict (image + language)
-     ▼
-Flask Backend (the_app.py)
-     │
-     ├─► MobileNetV3 Large (fine-tuned, 25 classes)
-     │        └── Returns: class_name, confidence %
-     │
-     └─► Google Gemini 3.6 Flash (LLM)
-              └── Returns: XAI explanation in chosen language
-
-     │  POST /chat (bird_name + user_message + language)
-     ▼
-Google Gemini 3.6 Flash
-     └── Returns: conversational follow-up answer
+                                    User Browser
+                             (Upload Image / Chat / Lang)
+                                          │
+                                          ▼
+                            Flask Web App (the_app.py)
+                                          │
+                  ┌───────────────────────┴───────────────────────┐
+                  ▼                                               ▼
+      [DEEP LEARNING LAYER]                          [AI AGENT LAYER (bird_agent.py)]
+     MobileNetV3 Classifier                                       │
+  (mobilenetv3_large_bird.pth)           ┌────────────────────────┼────────────────────────┐
+                  │                      │                        │                        │
+                  ▼                      ▼                        ▼                        ▼
+       Predict Class & Conf %      Tier 1: Gemini API       Tier 2: Wikipedia Agent  Tier 3: 25-Bird Local KB
+                                (Natural LLM & Multi-lang)   (Live Free Web Fetch)   (100% Offline Database)
 ```
 
 ---
 
-## ✅ Completed Changes
-
----
-
-### 1. Backend – [`the_app.py`](file:///c:/Users/bigha/OneDrive/Desktop/birds_25/the_app.py)
-
-#### What changed
-| # | Change | Reason |
-|---|--------|--------|
-| 1 | Fixed hardcoded absolute model path → `os.path.dirname(__file__)` | Portability |
-| 2 | Added `map_location=device` to `torch.load()` | CPU/GPU compatibility |
-| 3 | Changed `pretrained=False` → `weights=None` | Remove deprecation warning |
-| 4 | Added `torch.softmax()` to get confidence % | Show prediction certainty |
-| 5 | Integrated `google.genai` (new SDK) | LLM explanations |
-| 6 | Added `load_dotenv()` | Load `GEMINI_API_KEY` from `.env` |
-| 7 | Added `generate_explanation()` function | XAI prompt sent to Gemini |
-| 8 | Added `/chat` route | Follow-up Q&A with the LLM |
-| 9 | Updated Gemini model → `gemini-3.6-flash` | Fix 404 on deprecated model |
-
-#### Key functions
-
-**`generate_explanation(bird_name, scientific_name, language, confidence)`**
-- Sends a structured prompt to Gemini as an expert ornithologist
-- Asks the LLM to explain:
-  1. Physical features that caused the model's decision (XAI)
-  2. About the bird (description)
-  3. Habitat & range
-  4. One fun fact
-- Entire response is generated in the user's selected language
-
-**`/predict` route (POST)**
-- Accepts: `file` (image) + `language` (string)
-- Returns JSON: `prediction`, `scientific_name`, `image`, `confidence`, `explanation`
-
-**`/chat` route (POST)**
-- Accepts: `bird_name`, `scientific_name`, `message`, `language`
-- Returns JSON: `reply` from Gemini
-
----
-
-### 2. Frontend – [`templates/index.html`](file:///c:/Users/bigha/OneDrive/Desktop/birds_25/templates/index.html)
-
-Completely redesigned from a basic form into a **premium dark-mode chat application**.
-
-#### UI Components
-| Component | Description |
-|-----------|-------------|
-| **Header** | BirdBot logo with gradient text and model badge |
-| **Upload Panel** (left) | Drag-and-drop zone with live image preview |
-| **Language Selector** | Dropdown with 12 languages (English, Hindi, Spanish, French, German, Arabic, Chinese, Japanese, Portuguese, Bengali, Tamil, Marathi) |
-| **Identify Button** | Triggers `/predict`; shows loading spinner while waiting |
-| **Result Card** | Shows bird name, scientific name, animated confidence bar |
-| **Chat Panel** (right) | ChatGPT-style message bubbles with typing indicator |
-| **Input Bar** | Auto-resizing textarea, send on Enter or button click |
-
-#### Design System
-- **Font:** Inter (body) + Playfair Display (logo)
-- **Theme:** Dark mode (`#0b1120` background)
-- **Accent:** `#4ade80` (green) + `#22d3ee` (cyan)
-- **Animations:** `fadeUp` for messages, `bounce` for typing dots, animated confidence bar
-
----
-
-### 3. Environment – [`.env`](file:///c:/Users/bigha/OneDrive/Desktop/birds_25/.env)
-
-```
-GEMINI_API_KEY=your_key_here
-```
-
-Loaded automatically by `load_dotenv()` at startup. No manual `set` commands needed.
-
----
-
-### 4. New Dependencies Installed
-
-| Package | Purpose |
-|---------|---------|
-| `google-genai==2.24.0` | New Google Gemini Python SDK |
-| `peft` | (for chatbot_project fine-tuning scripts) |
-| `bitsandbytes` | 4-bit quantization for fine-tuning |
-| `trl` | SFT training wrapper |
-| `chromadb` | Vector DB for RAG (chatbot_project) |
-
----
-
-### 5. Cloud Computing (Deployment)
-
-To prepare the application for cloud deployment (e.g., Heroku, AWS, Render):
-- **WSGI Server:** Added `gunicorn` to dependencies for robust production serving.
-- **Procfile:** Created a `Procfile` with the entrypoint `web: gunicorn the_app:app`.
-
----
-
-## 📁 Final Project Structure
+## 📁 Project Structure
 
 ```
 birds_25/
-├── the_app.py              ← Main Flask app (MobileNet + Gemini)
-├── best_model_epoch_19.pth ← Fine-tuned MobileNetV3 weights
-├── .env                    ← GEMINI_API_KEY (do not commit to git!)
+├── the_app.py                                  ← Flask web server & prediction endpoints
+├── bird_agent.py                               ← Free tool-based agent & 25-species knowledge base
+├── mobilenetv3_large_bird_classification.pth   ← Fine-tuned MobileNetV3 weights (25 classes)
+├── best_model_epoch_19.pth                     ← Backup model checkpoint
+├── requirements.txt                            ← Cleaned project dependencies
+├── Procfile                                    ← Cloud deployment command (gunicorn)
+├── Dockerfile                                  ← Container build recipe
+├── .env                                        ← GEMINI_API_KEY (optional)
 ├── templates/
-│   └── index.html          ← Premium dark-mode chat UI
-├── static/
-│   └── images/             ← Reference bird images
-└── chatbot_project/        ← Standalone LLM fine-tuning boilerplate
-    ├── train.py            ← LoRA/PEFT fine-tuning script
-    ├── inference.py        ← RAG + LLM chatbot script
-    └── requirements.txt    ← Missing deps only
+│   └── index.html                              ← Dark-mode chat UI
+└── static/
+    └── images/                                 ← Reference bird images
 ```
 
 ---
 
-## 🔄 Request → Response Flow
+## 🔬 Component Breakdown
 
-```
-1. User drags image into the browser
-2. User selects language (e.g., "Hindi")
-3. User clicks "Identify Bird"
+### 1. Deep Learning (DL)
+- **Model**: `MobileNetV3 Large` (1280 input features, customized classifier with 25 output logits).
+- **Preprocessing Pipeline**: 
+  - Resize to `(224, 224)`
+  - Convert to Tensor
+  - ImageNet normalization: Mean `[0.485, 0.456, 0.406]`, Std `[0.229, 0.224, 0.225]`
+- **Inference**: Softmax probability calculation returning the predicted bird species and confidence percentage.
 
-4. Browser POSTs {file, language} → /predict
+### 2. Free Tool-Based Retrieval Agent (`bird_agent.py`)
+- **Wikipedia REST API**: Uses the Wikimedia REST API (`/api/rest_v1/page/summary/{title}`) to fetch species facts in real time. Free, no API key required, and resilient against API quota limits.
+- **Local 25-Bird Knowledge Store**: Pre-seeded with identification marks, habitat, diet, and fun facts for all 25 bird species in the dataset.
+- **Explainable AI (XAI)**: Breaks down the prediction into:
+  1. 🔍 Visual markers (beak shape, plumage, color patterns)
+  2. 🐦 Species overview
+  3. 🌿 Habitat & distribution
+  4. 🐛 Diet & feeding behavior
+  5. ⭐ Fun trivia fact
 
-5. Flask:
-   a. Preprocesses image (Resize 224x224, Normalize)
-   b. Runs MobileNetV3 → gets predicted class + confidence
-   c. Looks up bird name + scientific name from bird_info dict
-   d. Sends XAI prompt to Gemini 3.6 Flash
-   e. Returns JSON {prediction, scientific_name, confidence, explanation}
-
-6. Browser displays:
-   - Result card (name + confidence bar)
-   - Gemini explanation as a BirdBot chat bubble
-
-7. User types follow-up question → /chat
-8. Gemini answers in chosen language → displayed as new bubble
-```
+### 3. Cloud Computing (CC)
+- **Production Server**: Gunicorn WSGI (`web: gunicorn the_app:app`)
+- **Cloud Microservice Support**: `CLOUD_INFERENCE_URL` support to route heavy PyTorch inferences to Google Cloud Run or AWS Lambda endpoints.
+- **Free Web Hosting**: Deployable on **Render.com**, **Railway**, or **Google Cloud Run**.
 
 ---
 
-## 🚀 How to Run
+## 🚀 How to Run Locally
 
-```powershell
-cd "c:\Users\bigha\OneDrive\Desktop\birds_25"
-python the_app.py
-# Open http://127.0.0.1:5000
-```
+1. **Activate your environment**:
+   ```powershell
+   cd "c:\Users\bigha\OneDrive\Desktop\birds_25"
+   .\venv\Scripts\activate
+   ```
 
-> [!IMPORTANT]
-> The `.env` file must contain a valid `GEMINI_API_KEY`. Get one free at https://aistudio.google.com/app/apikey
+2. **Run the Flask application**:
+   ```powershell
+   python the_app.py
+   ```
 
-> [!TIP]
-> To add more bird classes in the future: add entries to `bird_info` in `the_app.py`, retrain MobileNetV3 with `out_features` matching the new class count, and replace `best_model_epoch_19.pth`.
+3. **Open in browser**:
+   Navigate to `http://127.0.0.1:5000`
+
+---
+
+## ☁️ Cloud Deployment (Free Tier on Render)
+
+1. Push your repository to GitHub.
+2. Log into [Render.com](https://render.com) and click **New Web Service**.
+3. Link your repository.
+4. Set:
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `gunicorn the_app:app`
+5. Click **Deploy**.
